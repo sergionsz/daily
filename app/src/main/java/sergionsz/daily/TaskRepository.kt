@@ -20,7 +20,8 @@ class TaskRepository(context: Context) {
                 emoji = if (o.has("emoji") && !o.isNull("emoji")) o.getString("emoji") else null,
                 iconName = if (o.has("iconName") && !o.isNull("iconName")) o.getString("iconName") else null,
                 lastCompletedDate = if (o.isNull("lastCompletedDate")) null
-                    else o.getString("lastCompletedDate")
+                    else o.getString("lastCompletedDate"),
+                isOneTime = o.optBoolean("isOneTime", false)
             )
         }
     }
@@ -34,6 +35,7 @@ class TaskRepository(context: Context) {
             o.put("emoji", t.emoji ?: JSONObject.NULL)
             o.put("iconName", t.iconName ?: JSONObject.NULL)
             o.put("lastCompletedDate", t.lastCompletedDate ?: JSONObject.NULL)
+            o.put("isOneTime", t.isOneTime)
             arr.put(o)
         }
         prefs.edit().putString(KEY_TASKS, arr.toString()).apply()
