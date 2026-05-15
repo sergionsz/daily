@@ -47,6 +47,9 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
@@ -114,14 +117,29 @@ fun DailyApp(repo: TaskRepository) {
     var today by remember { mutableStateOf(TaskRepository.todayKey()) }
 
     LaunchedEffect(Unit) {
+        val startupToday = TaskRepository.todayKey()
+        if (startupToday != today) today = startupToday
+        val pruned = tasks.filter { it.isVisibleOn(startupToday) }
+        if (pruned.size != tasks.size) {
+            tasks = pruned
+            repo.save(pruned)
+        }
         while (true) {
             delay(60_000L)
             val current = TaskRepository.todayKey()
-            if (current != today) today = current
+            if (current != today) {
+                today = current
+                val rolled = tasks.filter { it.isVisibleOn(current) }
+                if (rolled.size != tasks.size) {
+                    tasks = rolled
+                    repo.save(rolled)
+                }
+            }
         }
     }
 
-    val sorted = tasks.sortedBy { if (it.lastCompletedDate == today) 1 else 0 }
+    val visibleTasks = tasks.filter { it.isVisibleOn(today) }
+    val sorted = visibleTasks.sortedBy { if (it.isCompletedOn(today)) 1 else 0 }
 
     val lazyListState = rememberLazyListState()
     val reorderState = rememberReorderableLazyListState(lazyListState) { from, to ->
@@ -130,13 +148,13 @@ fun DailyApp(repo: TaskRepository) {
         val fromIdx = tasks.indexOfFirst { it.id == fromKey }
         val toIdx = tasks.indexOfFirst { it.id == toKey }
         if (fromIdx < 0 || toIdx < 0 || fromIdx == toIdx) return@rememberReorderableLazyListState
-        val fromCompleted = tasks[fromIdx].lastCompletedDate == today
-        val toCompleted = tasks[toIdx].lastCompletedDate == today
+        val fromCompleted = tasks[fromIdx].isCompletedOn(today)
+        val toCompleted = tasks[toIdx].isCompletedOn(today)
         if (fromCompleted != toCompleted) return@rememberReorderableLazyListState
         tasks = tasks.toMutableList().apply { add(toIdx, removeAt(fromIdx)) }
     }
 
-    val completedCount = tasks.count { it.lastCompletedDate == today }
+    val completedCount = visibleTasks.count { it.isCompletedOn(today) }
 
     Scaffold { padding ->
         Box(
@@ -149,12 +167,12 @@ fun DailyApp(repo: TaskRepository) {
                 modifier = Modifier.fillMaxSize()
             ) {
                 item {
-                    HeroHeader(completed = completedCount, total = tasks.size)
+                    HeroHeader(completed = completedCount, total = visibleTasks.size)
                     Spacer(Modifier.height(8.dp))
                 }
                 items(sorted, key = { it.id }) { task ->
                     var contextMenuOpen by remember { mutableStateOf(false) }
-                    val isCompleted = task.lastCompletedDate == today
+                    val isCompleted = task.isCompletedOn(today)
                     ReorderableItem(
                         state = reorderState,
                         key = task.id
@@ -264,7 +282,7 @@ fun DailyApp(repo: TaskRepository) {
                 dialogOpen = false
                 editingTask = null
             },
-            onConfirm = { name, emoji, iconName ->
+            onConfirm = { name, emoji, iconName, isOneTime ->
                 val trimmedName = name.trim()
                 val trimmedEmoji = emoji.trim().ifEmpty { null }
                 if (trimmedName.isNotEmpty()) {
@@ -275,7 +293,8 @@ fun DailyApp(repo: TaskRepository) {
                             name = trimmedName,
                             emoji = trimmedEmoji,
                             iconName = iconName,
-                            lastCompletedDate = null
+                            lastCompletedDate = null,
+                            isOneTime = isOneTime
                         )
                     } else {
                         tasks.map {
@@ -283,7 +302,8 @@ fun DailyApp(repo: TaskRepository) {
                                 it.copy(
                                     name = trimmedName,
                                     emoji = trimmedEmoji,
-                                    iconName = iconName
+                                    iconName = iconName,
+                                    isOneTime = isOneTime
                                 )
                             } else it
                         }
@@ -481,12 +501,13 @@ private fun todayLabel(): String =
 fun TaskDialog(
     initial: Task?,
     onDismiss: () -> Unit,
-    onConfirm: (name: String, emoji: String, iconName: String?) -> Unit
+    onConfirm: (name: String, emoji: String, iconName: String?, isOneTime: Boolean) -> Unit
 ) {
     val key = initial?.id
     var name by rememberSaveable(key) { mutableStateOf(initial?.name ?: "") }
     var emoji by rememberSaveable(key) { mutableStateOf(initial?.emoji ?: "") }
     var iconName by rememberSaveable(key) { mutableStateOf(initial?.iconName) }
+    var isOneTime by rememberSaveable(key) { mutableStateOf(initial?.isOneTime ?: false) }
     var pickerOpen by rememberSaveable(key) { mutableStateOf(false) }
     var pickerTab by rememberSaveable(key) {
         mutableIntStateOf(if (initial?.iconName != null) 1 else 0)
@@ -510,6 +531,19 @@ fun TaskDialog(
                         singleLine = true,
                         modifier = Modifier.weight(1f)
                     )
+                }
+                Spacer(Modifier.height(12.dp))
+                SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                    SegmentedButton(
+                        selected = !isOneTime,
+                        onClick = { isOneTime = false },
+                        shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2)
+                    ) { Text("Daily") }
+                    SegmentedButton(
+                        selected = isOneTime,
+                        onClick = { isOneTime = true },
+                        shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2)
+                    ) { Text("One-time") }
                 }
                 if (pickerOpen) {
                     Spacer(Modifier.height(12.dp))
@@ -573,7 +607,7 @@ fun TaskDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = { onConfirm(name, emoji, iconName) }) { Text("Save") }
+            TextButton(onClick = { onConfirm(name, emoji, iconName, isOneTime) }) { Text("Save") }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("Cancel") }
