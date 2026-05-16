@@ -5,14 +5,25 @@ data class Task(
     val name: String,
     val emoji: String? = null,
     val iconName: String? = null,
-    val lastCompletedDate: String? = null,
-    val isOneTime: Boolean = false
-)
+    val completionDates: Set<String> = emptySet(),
+    val isOneTime: Boolean = false,
+    val scheduledDate: String? = null
+) {
+    val lastCompletedDate: String? get() = completionDates.maxOrNull()
+}
 
-fun Task.isCompletedOn(today: String): Boolean =
-    if (isOneTime) lastCompletedDate != null else lastCompletedDate == today
+fun Task.isCompletedOn(date: String): Boolean = date in completionDates
 
 fun Task.isVisibleOn(today: String): Boolean {
     if (!isOneTime) return true
-    return lastCompletedDate == null || lastCompletedDate == today
+    if (today in completionDates) return true
+    if (completionDates.isNotEmpty()) return false
+    val scheduled = scheduledDate ?: return true
+    return scheduled <= today
+}
+
+fun Task.shouldBePersisted(today: String): Boolean {
+    if (!isOneTime) return true
+    if (completionDates.isEmpty()) return true
+    return today in completionDates
 }
