@@ -4,9 +4,8 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,25 +17,24 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.DragHandle
-import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
@@ -60,6 +58,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -75,6 +74,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.emoji2.emojipicker.EmojiPickerView
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import sergionsz.daily.ui.theme.DailyTheme
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
@@ -113,13 +113,14 @@ fun DailyApp(repo: TaskRepository) {
     var tasks by remember { mutableStateOf(repo.load()) }
     var dialogOpen by remember { mutableStateOf(false) }
     var editingTask by remember { mutableStateOf<Task?>(null) }
+    var detailTaskId by remember { mutableStateOf<Long?>(null) }
     var reorderMode by remember { mutableStateOf(false) }
     var today by remember { mutableStateOf(TaskRepository.todayKey()) }
 
     LaunchedEffect(Unit) {
         val startupToday = TaskRepository.todayKey()
         if (startupToday != today) today = startupToday
-        val pruned = tasks.filter { it.isVisibleOn(startupToday) }
+        val pruned = tasks.filter { it.shouldBePersisted(startupToday) }
         if (pruned.size != tasks.size) {
             tasks = pruned
             repo.save(pruned)
@@ -129,7 +130,7 @@ fun DailyApp(repo: TaskRepository) {
             val current = TaskRepository.todayKey()
             if (current != today) {
                 today = current
-                val rolled = tasks.filter { it.isVisibleOn(current) }
+                val rolled = tasks.filter { it.shouldBePersisted(current) }
                 if (rolled.size != tasks.size) {
                     tasks = rolled
                     repo.save(rolled)
@@ -138,139 +139,75 @@ fun DailyApp(repo: TaskRepository) {
         }
     }
 
-    val visibleTasks = tasks.filter { it.isVisibleOn(today) }
-    val sorted = visibleTasks.sortedBy { if (it.isCompletedOn(today)) 1 else 0 }
-
-    val lazyListState = rememberLazyListState()
-    val reorderState = rememberReorderableLazyListState(lazyListState) { from, to ->
-        val fromKey = from.key as? Long ?: return@rememberReorderableLazyListState
-        val toKey = to.key as? Long ?: return@rememberReorderableLazyListState
-        val fromIdx = tasks.indexOfFirst { it.id == fromKey }
-        val toIdx = tasks.indexOfFirst { it.id == toKey }
-        if (fromIdx < 0 || toIdx < 0 || fromIdx == toIdx) return@rememberReorderableLazyListState
-        val fromCompleted = tasks[fromIdx].isCompletedOn(today)
-        val toCompleted = tasks[toIdx].isCompletedOn(today)
-        if (fromCompleted != toCompleted) return@rememberReorderableLazyListState
-        tasks = tasks.toMutableList().apply { add(toIdx, removeAt(fromIdx)) }
-    }
-
-    val completedCount = visibleTasks.count { it.isCompletedOn(today) }
-
-    Scaffold { padding ->
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-        ) {
-            LazyColumn(
-                state = lazyListState,
-                modifier = Modifier.fillMaxSize()
-            ) {
-                item {
-                    HeroHeader(completed = completedCount, total = visibleTasks.size)
-                    Spacer(Modifier.height(8.dp))
+    val detailTask = detailTaskId?.let { id -> tasks.firstOrNull { it.id == id } }
+    if (detailTask != null) {
+        TaskDetailScreen(
+            task = detailTask,
+            today = today,
+            onBack = { detailTaskId = null },
+            onEdit = {
+                editingTask = detailTask
+                dialogOpen = true
+            },
+            onDelete = {
+                tasks = tasks.filter { it.id != detailTask.id }
+                repo.save(tasks)
+                detailTaskId = null
+            },
+            onReschedule = { newDate ->
+                tasks = tasks.map {
+                    if (it.id == detailTask.id) it.copy(scheduledDate = newDate) else it
                 }
-                items(sorted, key = { it.id }) { task ->
-                    var contextMenuOpen by remember { mutableStateOf(false) }
-                    val isCompleted = task.isCompletedOn(today)
-                    ReorderableItem(
-                        state = reorderState,
-                        key = task.id
-                    ) { isDragging ->
-                        val elevation = if (isDragging) 8.dp else 1.dp
-                        val cardColor = if (isCompleted) {
-                            MaterialTheme.colorScheme.surfaceContainerLow
-                        } else {
-                            MaterialTheme.colorScheme.surfaceContainerHigh
-                        }
-                        Surface(
-                            modifier = Modifier
-                                .padding(horizontal = 16.dp, vertical = 4.dp)
-                                .longPressDraggableHandle(
-                                    enabled = reorderMode,
-                                    onDragStopped = { repo.save(tasks) }
-                                ),
-                            shape = RoundedCornerShape(20.dp),
-                            tonalElevation = elevation,
-                            shadowElevation = elevation,
-                            color = cardColor
-                        ) {
-                            Box {
-                                TaskRow(
-                                    task = task,
-                                    isCompleted = isCompleted,
-                                    reorderMode = reorderMode,
-                                    onToggle = { checked ->
-                                        tasks = tasks.map {
-                                            if (it.id == task.id) {
-                                                it.copy(lastCompletedDate = if (checked) today else null)
-                                            } else it
-                                        }
-                                        repo.save(tasks)
-                                    },
-                                    onLongPress = { contextMenuOpen = true }
-                                )
-                                DropdownMenu(
-                                    expanded = contextMenuOpen,
-                                    onDismissRequest = { contextMenuOpen = false }
-                                ) {
-                                    DropdownMenuItem(
-                                        text = { Text("Edit") },
-                                        leadingIcon = {
-                                            Icon(Icons.Default.Edit, contentDescription = null)
-                                        },
-                                        onClick = {
-                                            contextMenuOpen = false
-                                            editingTask = task
-                                            dialogOpen = true
-                                        }
-                                    )
-                                    DropdownMenuItem(
-                                        text = { Text("Delete") },
-                                        leadingIcon = {
-                                            Icon(Icons.Default.Delete, contentDescription = null)
-                                        },
-                                        onClick = {
-                                            contextMenuOpen = false
-                                            val updated = tasks.filter { it.id != task.id }
-                                            tasks = updated
-                                            repo.save(updated)
-                                        }
-                                    )
-                                }
-                            }
-                        }
-                    }
+                repo.save(tasks)
+                detailTaskId = null
+            }
+        )
+    } else {
+        val pagerState = rememberPagerState(pageCount = { 2 })
+        val scope = rememberCoroutineScope()
+        Scaffold(
+            topBar = {
+                PrimaryTabRow(
+                    selectedTabIndex = pagerState.currentPage,
+                    modifier = Modifier.statusBarsPadding()
+                ) {
+                    Tab(
+                        selected = pagerState.currentPage == 0,
+                        onClick = { scope.launch { pagerState.animateScrollToPage(0) } },
+                        text = { Text("Daily") }
+                    )
+                    Tab(
+                        selected = pagerState.currentPage == 1,
+                        onClick = { scope.launch { pagerState.animateScrollToPage(1) } },
+                        text = { Text("Stats") }
+                    )
                 }
             }
-
-            FloatingActionButton(
-                onClick = { reorderMode = !reorderMode },
-                modifier = Modifier
-                    .align(Alignment.BottomStart)
-                    .padding(16.dp),
-                containerColor = if (reorderMode) {
-                    MaterialTheme.colorScheme.primaryContainer
-                } else {
-                    MaterialTheme.colorScheme.surfaceVariant
+        ) { padding ->
+            HorizontalPager(
+                state = pagerState,
+                modifier = Modifier.fillMaxSize().padding(padding)
+            ) { page ->
+                when (page) {
+                    0 -> DailyTab(
+                        tasks = tasks,
+                        today = today,
+                        reorderMode = reorderMode,
+                        onTasksChange = { newTasks ->
+                            tasks = newTasks
+                            repo.save(newTasks)
+                        },
+                        onTasksReorder = { newTasks -> tasks = newTasks },
+                        onTasksReorderEnd = { repo.save(tasks) },
+                        onToggleReorderMode = { reorderMode = !reorderMode },
+                        onTaskClick = { task -> detailTaskId = task.id },
+                        onNewTask = {
+                            editingTask = null
+                            dialogOpen = true
+                        }
+                    )
+                    1 -> StatsScreen(tasks = tasks, today = today)
                 }
-            ) {
-                Icon(
-                    imageVector = if (reorderMode) Icons.Default.Done else Icons.Default.SwapVert,
-                    contentDescription = if (reorderMode) "Done reordering" else "Reorder tasks"
-                )
-            }
-
-            FloatingActionButton(
-                onClick = {
-                    editingTask = null
-                    dialogOpen = true
-                },
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(16.dp)
-            ) {
-                Icon(Icons.Default.Add, contentDescription = "New task")
             }
         }
     }
@@ -293,17 +230,24 @@ fun DailyApp(repo: TaskRepository) {
                             name = trimmedName,
                             emoji = trimmedEmoji,
                             iconName = iconName,
-                            lastCompletedDate = null,
-                            isOneTime = isOneTime
+                            completionDates = emptySet(),
+                            isOneTime = isOneTime,
+                            scheduledDate = if (isOneTime) today else null
                         )
                     } else {
                         tasks.map {
                             if (it.id == current.id) {
+                                val newScheduled = when {
+                                    !isOneTime -> null
+                                    it.isOneTime -> it.scheduledDate ?: today
+                                    else -> today
+                                }
                                 it.copy(
                                     name = trimmedName,
                                     emoji = trimmedEmoji,
                                     iconName = iconName,
-                                    isOneTime = isOneTime
+                                    isOneTime = isOneTime,
+                                    scheduledDate = newScheduled
                                 )
                             } else it
                         }
@@ -318,14 +262,128 @@ fun DailyApp(repo: TaskRepository) {
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DailyTab(
+    tasks: List<Task>,
+    today: String,
+    reorderMode: Boolean,
+    onTasksChange: (List<Task>) -> Unit,
+    onTasksReorder: (List<Task>) -> Unit,
+    onTasksReorderEnd: () -> Unit,
+    onToggleReorderMode: () -> Unit,
+    onTaskClick: (Task) -> Unit,
+    onNewTask: () -> Unit
+) {
+    val visibleTasks = tasks.filter { it.isVisibleOn(today) }
+    val sorted = visibleTasks.sortedBy { if (it.isCompletedOn(today)) 1 else 0 }
+
+    val lazyListState = rememberLazyListState()
+    val reorderState = rememberReorderableLazyListState(lazyListState) { from, to ->
+        val fromKey = from.key as? Long ?: return@rememberReorderableLazyListState
+        val toKey = to.key as? Long ?: return@rememberReorderableLazyListState
+        val fromIdx = tasks.indexOfFirst { it.id == fromKey }
+        val toIdx = tasks.indexOfFirst { it.id == toKey }
+        if (fromIdx < 0 || toIdx < 0 || fromIdx == toIdx) return@rememberReorderableLazyListState
+        val fromCompleted = tasks[fromIdx].isCompletedOn(today)
+        val toCompleted = tasks[toIdx].isCompletedOn(today)
+        if (fromCompleted != toCompleted) return@rememberReorderableLazyListState
+        onTasksReorder(tasks.toMutableList().apply { add(toIdx, removeAt(fromIdx)) })
+    }
+
+    val completedCount = visibleTasks.count { it.isCompletedOn(today) }
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        LazyColumn(
+            state = lazyListState,
+            modifier = Modifier.fillMaxSize()
+        ) {
+            item {
+                HeroHeader(completed = completedCount, total = visibleTasks.size)
+                Spacer(Modifier.height(8.dp))
+            }
+            items(sorted, key = { it.id }) { task ->
+                val isCompleted = task.isCompletedOn(today)
+                ReorderableItem(
+                    state = reorderState,
+                    key = task.id
+                ) { isDragging ->
+                    val elevation = if (isDragging) 8.dp else 1.dp
+                    val cardColor = if (isCompleted) {
+                        MaterialTheme.colorScheme.surfaceContainerLow
+                    } else {
+                        MaterialTheme.colorScheme.surfaceContainerHigh
+                    }
+                    Surface(
+                        modifier = Modifier
+                            .padding(horizontal = 16.dp, vertical = 4.dp)
+                            .longPressDraggableHandle(
+                                enabled = reorderMode,
+                                onDragStopped = { onTasksReorderEnd() }
+                            ),
+                        shape = RoundedCornerShape(20.dp),
+                        tonalElevation = elevation,
+                        shadowElevation = elevation,
+                        color = cardColor
+                    ) {
+                        TaskRow(
+                            task = task,
+                            isCompleted = isCompleted,
+                            reorderMode = reorderMode,
+                            onToggle = { checked ->
+                                onTasksChange(tasks.map {
+                                    if (it.id == task.id) {
+                                        val newDates = if (checked) {
+                                            it.completionDates + today
+                                        } else {
+                                            it.completionDates - today
+                                        }
+                                        it.copy(completionDates = newDates)
+                                    } else it
+                                })
+                            },
+                            onClick = { onTaskClick(task) }
+                        )
+                    }
+                }
+            }
+        }
+
+        FloatingActionButton(
+            onClick = onToggleReorderMode,
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .padding(16.dp),
+            containerColor = if (reorderMode) {
+                MaterialTheme.colorScheme.primaryContainer
+            } else {
+                MaterialTheme.colorScheme.surfaceVariant
+            }
+        ) {
+            Icon(
+                imageVector = if (reorderMode) Icons.Default.Done else Icons.Default.SwapVert,
+                contentDescription = if (reorderMode) "Done reordering" else "Reorder tasks"
+            )
+        }
+
+        FloatingActionButton(
+            onClick = onNewTask,
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(16.dp)
+        ) {
+            Icon(Icons.Default.Add, contentDescription = "New task")
+        }
+    }
+}
+
 @Composable
 fun TaskRow(
     task: Task,
     isCompleted: Boolean,
     reorderMode: Boolean,
     onToggle: (Boolean) -> Unit,
-    onLongPress: () -> Unit
+    onClick: () -> Unit
 ) {
     val alpha = if (isCompleted) 0.4f else 1f
     Row(
@@ -338,14 +396,7 @@ fun TaskRow(
             modifier = Modifier
                 .weight(1f)
                 .then(
-                    if (reorderMode) {
-                        Modifier
-                    } else {
-                        Modifier.combinedClickable(
-                            onClick = {},
-                            onLongClick = onLongPress
-                        )
-                    }
+                    if (reorderMode) Modifier else Modifier.clickable(onClick = onClick)
                 )
                 .padding(vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically

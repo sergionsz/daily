@@ -14,14 +14,23 @@ class TaskRepository(context: Context) {
         val arr = JSONArray(json)
         return List(arr.length()) { i ->
             val o = arr.getJSONObject(i)
+            val dates = mutableSetOf<String>()
+            if (o.has("completionDates") && !o.isNull("completionDates")) {
+                val datesArr = o.getJSONArray("completionDates")
+                for (j in 0 until datesArr.length()) {
+                    dates.add(datesArr.getString(j))
+                }
+            } else if (o.has("lastCompletedDate") && !o.isNull("lastCompletedDate")) {
+                dates.add(o.getString("lastCompletedDate"))
+            }
             Task(
                 id = o.getLong("id"),
                 name = o.getString("name"),
                 emoji = if (o.has("emoji") && !o.isNull("emoji")) o.getString("emoji") else null,
                 iconName = if (o.has("iconName") && !o.isNull("iconName")) o.getString("iconName") else null,
-                lastCompletedDate = if (o.isNull("lastCompletedDate")) null
-                    else o.getString("lastCompletedDate"),
-                isOneTime = o.optBoolean("isOneTime", false)
+                completionDates = dates,
+                isOneTime = o.optBoolean("isOneTime", false),
+                scheduledDate = if (o.has("scheduledDate") && !o.isNull("scheduledDate")) o.getString("scheduledDate") else null
             )
         }
     }
@@ -34,8 +43,12 @@ class TaskRepository(context: Context) {
             o.put("name", t.name)
             o.put("emoji", t.emoji ?: JSONObject.NULL)
             o.put("iconName", t.iconName ?: JSONObject.NULL)
+            val datesArr = JSONArray()
+            t.completionDates.sorted().forEach { datesArr.put(it) }
+            o.put("completionDates", datesArr)
             o.put("lastCompletedDate", t.lastCompletedDate ?: JSONObject.NULL)
             o.put("isOneTime", t.isOneTime)
+            o.put("scheduledDate", t.scheduledDate ?: JSONObject.NULL)
             arr.put(o)
         }
         prefs.edit().putString(KEY_TASKS, arr.toString()).apply()
