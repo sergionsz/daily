@@ -1,6 +1,8 @@
 package sergionsz.daily
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -12,14 +14,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.AddPhotoAlternate
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
@@ -28,7 +28,11 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -37,11 +41,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import java.util.Calendar
@@ -50,23 +54,62 @@ import java.util.TimeZone
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TaskDetailScreen(
-    task: Task,
+    initial: Task?,
     today: String,
-    onBack: () -> Unit,
-    onEdit: () -> Unit,
-    onDelete: () -> Unit,
-    onReschedule: (String) -> Unit
+    onClose: () -> Unit,
+    onSave: (Task) -> Unit,
+    onDelete: () -> Unit
 ) {
+    val key = initial?.id
+    var name by rememberSaveable(key) { mutableStateOf(initial?.name ?: "") }
+    var emoji by rememberSaveable(key) { mutableStateOf(initial?.emoji ?: "") }
+    var iconName by rememberSaveable(key) { mutableStateOf(initial?.iconName) }
+    var isOneTime by rememberSaveable(key) { mutableStateOf(initial?.isOneTime ?: false) }
+    var scheduledDate by rememberSaveable(key) {
+        mutableStateOf(initial?.scheduledDate ?: if (initial?.isOneTime == true) today else null)
+    }
+    var pickerOpen by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
     var datePickerOpen by remember { mutableStateOf(false) }
+
+    fun commitAndClose() {
+        val trimmed = name.trim()
+        if (trimmed.isNotEmpty()) {
+            val cleanedEmoji = emoji.trim().ifEmpty { null }
+            val effectiveScheduled = if (isOneTime) (scheduledDate ?: today) else null
+            val task = if (initial == null) {
+                Task(
+                    id = System.currentTimeMillis(),
+                    name = trimmed,
+                    emoji = cleanedEmoji,
+                    iconName = iconName,
+                    completionDates = emptySet(),
+                    isOneTime = isOneTime,
+                    scheduledDate = effectiveScheduled
+                )
+            } else {
+                initial.copy(
+                    name = trimmed,
+                    emoji = cleanedEmoji,
+                    iconName = iconName,
+                    isOneTime = isOneTime,
+                    scheduledDate = effectiveScheduled
+                )
+            }
+            onSave(task)
+        }
+        onClose()
+    }
+
+    BackHandler { commitAndClose() }
 
     Scaffold(
         topBar = {
             TopAppBar(
                 modifier = Modifier.statusBarsPadding(),
-                title = { Text("Task") },
+                title = { Text(if (initial == null) "New task" else "Task") },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    IconButton(onClick = { commitAndClose() }) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 }
@@ -81,46 +124,46 @@ fun TaskDetailScreen(
         ) {
             Spacer(Modifier.height(8.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
-                TaskIcon(task)
+                EditableTaskIcon(
+                    emoji = emoji,
+                    iconName = iconName,
+                    onClick = { pickerOpen = true }
+                )
                 Spacer(Modifier.size(16.dp))
-                Column {
-                    Text(
-                        text = task.name,
-                        fontSize = 24.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        text = if (task.isOneTime) "One-time task" else "Daily task",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-
-            if (task.isOneTime && task.scheduledDate != null) {
-                Spacer(Modifier.height(16.dp))
-                Text(
-                    text = "Scheduled for ${task.scheduledDate}",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("Task name") },
+                    singleLine = true,
+                    modifier = Modifier.weight(1f)
                 )
             }
 
-            Spacer(Modifier.height(32.dp))
-
-            Button(
-                onClick = onEdit,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Icon(Icons.Default.Edit, contentDescription = null)
-                Spacer(Modifier.size(8.dp))
-                Text("Edit")
+            Spacer(Modifier.height(16.dp))
+            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                SegmentedButton(
+                    selected = !isOneTime,
+                    onClick = { isOneTime = false },
+                    shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2)
+                ) { Text("Daily") }
+                SegmentedButton(
+                    selected = isOneTime,
+                    onClick = {
+                        isOneTime = true
+                        if (scheduledDate == null) scheduledDate = today
+                    },
+                    shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2)
+                ) { Text("One-time") }
             }
 
-            if (task.isOneTime) {
-                Spacer(Modifier.height(12.dp))
+            if (isOneTime) {
+                Spacer(Modifier.height(16.dp))
+                Text(
+                    text = "Scheduled for ${scheduledDate ?: today}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(8.dp))
                 OutlinedButton(
                     onClick = { datePickerOpen = true },
                     modifier = Modifier.fillMaxWidth()
@@ -131,26 +174,54 @@ fun TaskDetailScreen(
                 }
             }
 
-            Spacer(Modifier.height(12.dp))
-            OutlinedButton(
-                onClick = { confirmDelete = true },
-                modifier = Modifier.fillMaxWidth(),
-                colors = ButtonDefaults.outlinedButtonColors(
-                    contentColor = MaterialTheme.colorScheme.error
-                )
-            ) {
-                Icon(Icons.Default.Delete, contentDescription = null)
-                Spacer(Modifier.size(8.dp))
-                Text("Delete")
+            if (initial != null) {
+                Spacer(Modifier.height(24.dp))
+                OutlinedButton(
+                    onClick = { confirmDelete = true },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = MaterialTheme.colorScheme.error
+                    )
+                ) {
+                    Icon(Icons.Default.Delete, contentDescription = null)
+                    Spacer(Modifier.size(8.dp))
+                    Text("Delete")
+                }
             }
         }
+    }
+
+    if (pickerOpen) {
+        IconPickerDialog(
+            currentEmoji = emoji,
+            currentIconName = iconName,
+            onDismiss = { pickerOpen = false },
+            onSelectEmoji = {
+                emoji = it
+                iconName = null
+                pickerOpen = false
+            },
+            onSelectIcon = {
+                iconName = it
+                emoji = ""
+                pickerOpen = false
+            },
+            onClear = {
+                emoji = ""
+                iconName = null
+                pickerOpen = false
+            }
+        )
     }
 
     if (confirmDelete) {
         AlertDialog(
             onDismissRequest = { confirmDelete = false },
             title = { Text("Delete task?") },
-            text = { Text("\"${task.name}\" will be removed.") },
+            text = {
+                val displayName = name.trim().ifEmpty { initial?.name ?: "" }
+                Text("\"$displayName\" will be removed.")
+            },
             confirmButton = {
                 TextButton(onClick = {
                     confirmDelete = false
@@ -164,8 +235,8 @@ fun TaskDetailScreen(
     }
 
     if (datePickerOpen) {
-        val initialMillis = remember(task.scheduledDate, today) {
-            dateStringToUtcMillis(task.scheduledDate ?: today)
+        val initialMillis = remember(scheduledDate, today) {
+            dateStringToUtcMillis(scheduledDate ?: today)
         }
         val datePickerState = rememberDatePickerState(initialSelectedDateMillis = initialMillis)
         DatePickerDialog(
@@ -174,7 +245,7 @@ fun TaskDetailScreen(
                 TextButton(onClick = {
                     val millis = datePickerState.selectedDateMillis
                     if (millis != null) {
-                        onReschedule(utcMillisToDateString(millis))
+                        scheduledDate = utcMillisToDateString(millis)
                     }
                     datePickerOpen = false
                 }) { Text("OK") }
@@ -189,23 +260,33 @@ fun TaskDetailScreen(
 }
 
 @Composable
-private fun TaskIcon(task: Task) {
-    val hasEmoji = !task.emoji.isNullOrEmpty()
-    val vector = if (!hasEmoji && !task.iconName.isNullOrEmpty()) {
-        IconCatalog.byName(task.iconName)
+private fun EditableTaskIcon(
+    emoji: String,
+    iconName: String?,
+    onClick: () -> Unit
+) {
+    val vector = if (emoji.isEmpty() && !iconName.isNullOrEmpty()) {
+        IconCatalog.byName(iconName)
     } else null
     Box(
         modifier = Modifier
             .size(56.dp)
             .clip(CircleShape)
-            .background(MaterialTheme.colorScheme.primaryContainer),
+            .background(MaterialTheme.colorScheme.primaryContainer)
+            .clickable(onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
         when {
-            hasEmoji -> Text(text = task.emoji!!, fontSize = 28.sp)
+            emoji.isNotEmpty() -> Text(text = emoji, fontSize = 28.sp)
             vector != null -> Icon(
                 imageVector = vector,
-                contentDescription = null,
+                contentDescription = "Change icon",
+                tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                modifier = Modifier.size(28.dp)
+            )
+            else -> Icon(
+                imageVector = Icons.Default.AddPhotoAlternate,
+                contentDescription = "Choose icon",
                 tint = MaterialTheme.colorScheme.onPrimaryContainer,
                 modifier = Modifier.size(28.dp)
             )
