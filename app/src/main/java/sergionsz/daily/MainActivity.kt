@@ -9,7 +9,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -32,47 +31,34 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
-import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SwapVert
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.viewinterop.AndroidView
-import androidx.emoji2.emojipicker.EmojiPickerView
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import sergionsz.daily.ui.theme.DailyTheme
@@ -81,18 +67,6 @@ import sh.calvin.reorderable.rememberReorderableLazyListState
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-
-private val SuggestedEmojis = listOf(
-    "⭐", "🎯", "✅", "💡", "❤️", "🔥", "✨", "🎉",
-    "🏃", "💪", "🧘", "📚", "💧", "💤", "☕", "🌱"
-)
-
-private val SuggestedIconNames = listOf(
-    "Star", "Favorite", "EmojiEvents", "Bolt",
-    "FitnessCenter", "DirectionsRun", "SelfImprovement", "MenuBook",
-    "LocalDrink", "Bedtime", "Computer", "MusicNote",
-    "Brush", "Spa", "AutoAwesome", "Flag"
-)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -107,13 +81,16 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+private sealed class DetailTarget {
+    data class Existing(val id: Long) : DetailTarget()
+    object New : DetailTarget()
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DailyApp(repo: TaskRepository) {
     var tasks by remember { mutableStateOf(repo.load()) }
-    var dialogOpen by remember { mutableStateOf(false) }
-    var editingTask by remember { mutableStateOf<Task?>(null) }
-    var detailTaskId by remember { mutableStateOf<Long?>(null) }
+    var detailTarget by remember { mutableStateOf<DetailTarget?>(null) }
     var reorderMode by remember { mutableStateOf(false) }
     var today by remember { mutableStateOf(TaskRepository.todayKey()) }
 
@@ -139,27 +116,33 @@ fun DailyApp(repo: TaskRepository) {
         }
     }
 
-    val detailTask = detailTaskId?.let { id -> tasks.firstOrNull { it.id == id } }
-    if (detailTask != null) {
+    val target = detailTarget
+    val detailTask = (target as? DetailTarget.Existing)?.let { t ->
+        tasks.firstOrNull { it.id == t.id }
+    }
+    if (target != null && (target is DetailTarget.New || detailTask != null)) {
         TaskDetailScreen(
-            task = detailTask,
+            initial = detailTask,
             today = today,
-            onBack = { detailTaskId = null },
-            onEdit = {
-                editingTask = detailTask
-                dialogOpen = true
+            onClose = { detailTarget = null },
+            onSave = { saved ->
+                val existingId = (target as? DetailTarget.Existing)?.id
+                val updated = if (existingId == null) {
+                    tasks + saved
+                } else {
+                    tasks.map { if (it.id == existingId) saved else it }
+                }
+                tasks = updated
+                repo.save(updated)
             },
             onDelete = {
-                tasks = tasks.filter { it.id != detailTask.id }
-                repo.save(tasks)
-                detailTaskId = null
-            },
-            onReschedule = { newDate ->
-                tasks = tasks.map {
-                    if (it.id == detailTask.id) it.copy(scheduledDate = newDate) else it
+                val existingId = (target as? DetailTarget.Existing)?.id
+                if (existingId != null) {
+                    val updated = tasks.filter { it.id != existingId }
+                    tasks = updated
+                    repo.save(updated)
                 }
-                repo.save(tasks)
-                detailTaskId = null
+                detailTarget = null
             }
         )
     } else {
@@ -200,65 +183,13 @@ fun DailyApp(repo: TaskRepository) {
                         onTasksReorder = { newTasks -> tasks = newTasks },
                         onTasksReorderEnd = { repo.save(tasks) },
                         onToggleReorderMode = { reorderMode = !reorderMode },
-                        onTaskClick = { task -> detailTaskId = task.id },
-                        onNewTask = {
-                            editingTask = null
-                            dialogOpen = true
-                        }
+                        onTaskClick = { task -> detailTarget = DetailTarget.Existing(task.id) },
+                        onNewTask = { detailTarget = DetailTarget.New }
                     )
                     1 -> StatsScreen(tasks = tasks, today = today)
                 }
             }
         }
-    }
-
-    if (dialogOpen) {
-        TaskDialog(
-            initial = editingTask,
-            onDismiss = {
-                dialogOpen = false
-                editingTask = null
-            },
-            onConfirm = { name, emoji, iconName, isOneTime ->
-                val trimmedName = name.trim()
-                val trimmedEmoji = emoji.trim().ifEmpty { null }
-                if (trimmedName.isNotEmpty()) {
-                    val current = editingTask
-                    val updated = if (current == null) {
-                        tasks + Task(
-                            id = System.currentTimeMillis(),
-                            name = trimmedName,
-                            emoji = trimmedEmoji,
-                            iconName = iconName,
-                            completionDates = emptySet(),
-                            isOneTime = isOneTime,
-                            scheduledDate = if (isOneTime) today else null
-                        )
-                    } else {
-                        tasks.map {
-                            if (it.id == current.id) {
-                                val newScheduled = when {
-                                    !isOneTime -> null
-                                    it.isOneTime -> it.scheduledDate ?: today
-                                    else -> today
-                                }
-                                it.copy(
-                                    name = trimmedName,
-                                    emoji = trimmedEmoji,
-                                    iconName = iconName,
-                                    isOneTime = isOneTime,
-                                    scheduledDate = newScheduled
-                                )
-                            } else it
-                        }
-                    }
-                    tasks = updated
-                    repo.save(updated)
-                }
-                dialogOpen = false
-                editingTask = null
-            }
-        )
     }
 }
 
@@ -547,312 +478,3 @@ private fun ProgressSection(completed: Int, total: Int) {
 
 private fun todayLabel(): String =
     SimpleDateFormat("EEEE, MMMM d", Locale.getDefault()).format(Date())
-
-@Composable
-fun TaskDialog(
-    initial: Task?,
-    onDismiss: () -> Unit,
-    onConfirm: (name: String, emoji: String, iconName: String?, isOneTime: Boolean) -> Unit
-) {
-    val key = initial?.id
-    var name by rememberSaveable(key) { mutableStateOf(initial?.name ?: "") }
-    var emoji by rememberSaveable(key) { mutableStateOf(initial?.emoji ?: "") }
-    var iconName by rememberSaveable(key) { mutableStateOf(initial?.iconName) }
-    var isOneTime by rememberSaveable(key) { mutableStateOf(initial?.isOneTime ?: false) }
-    var pickerOpen by rememberSaveable(key) { mutableStateOf(false) }
-    var pickerTab by rememberSaveable(key) {
-        mutableIntStateOf(if (initial?.iconName != null) 1 else 0)
-    }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(if (initial == null) "New task" else "Edit task") },
-        text = {
-            Column {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconPickerButton(
-                        emoji = emoji,
-                        iconName = iconName,
-                        onClick = { pickerOpen = !pickerOpen }
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    OutlinedTextField(
-                        value = name,
-                        onValueChange = { name = it },
-                        label = { Text("Task name") },
-                        singleLine = true,
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-                Spacer(Modifier.height(12.dp))
-                SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                    SegmentedButton(
-                        selected = !isOneTime,
-                        onClick = { isOneTime = false },
-                        shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2)
-                    ) { Text("Daily") }
-                    SegmentedButton(
-                        selected = isOneTime,
-                        onClick = { isOneTime = true },
-                        shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2)
-                    ) { Text("One-time") }
-                }
-                if (pickerOpen) {
-                    Spacer(Modifier.height(12.dp))
-                    PrimaryTabRow(selectedTabIndex = pickerTab) {
-                        Tab(
-                            selected = pickerTab == 0,
-                            onClick = { pickerTab = 0 },
-                            text = { Text("Suggested") }
-                        )
-                        Tab(
-                            selected = pickerTab == 1,
-                            onClick = { pickerTab = 1 },
-                            text = { Text("Icon") }
-                        )
-                        Tab(
-                            selected = pickerTab == 2,
-                            onClick = { pickerTab = 2 },
-                            text = { Text("Emoji") }
-                        )
-                    }
-                    Spacer(Modifier.height(8.dp))
-                    when (pickerTab) {
-                        0 -> SuggestedPicker(
-                            selectedEmoji = emoji,
-                            selectedIcon = iconName,
-                            onEmojiSelect = {
-                                emoji = it
-                                iconName = null
-                                pickerOpen = false
-                            },
-                            onIconSelect = {
-                                iconName = it
-                                emoji = ""
-                                pickerOpen = false
-                            }
-                        )
-                        1 -> IconPicker(
-                            selected = iconName,
-                            onSelect = {
-                                iconName = it
-                                emoji = ""
-                                pickerOpen = false
-                            }
-                        )
-                        else -> SystemEmojiPicker(
-                            onSelect = {
-                                emoji = it
-                                iconName = null
-                                pickerOpen = false
-                            }
-                        )
-                    }
-                    TextButton(onClick = {
-                        emoji = ""
-                        iconName = null
-                        pickerOpen = false
-                    }) {
-                        Text("None")
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = { onConfirm(name, emoji, iconName, isOneTime) }) { Text("Save") }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
-        }
-    )
-}
-
-@Composable
-private fun IconPickerButton(emoji: String, iconName: String?, onClick: () -> Unit) {
-    OutlinedButton(
-        onClick = onClick,
-        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-        modifier = Modifier.height(56.dp)
-    ) {
-        val vector = IconCatalog.byName(iconName)
-        when {
-            emoji.isNotEmpty() -> Text(emoji, fontSize = 22.sp)
-            vector != null -> Icon(
-                imageVector = vector,
-                contentDescription = null,
-                modifier = Modifier.size(22.dp)
-            )
-            else -> Text("Icon", style = MaterialTheme.typography.labelLarge)
-        }
-    }
-}
-
-@Composable
-private fun SuggestedPicker(
-    selectedEmoji: String,
-    selectedIcon: String?,
-    onEmojiSelect: (String) -> Unit,
-    onIconSelect: (String) -> Unit
-) {
-    Column(modifier = Modifier.fillMaxWidth()) {
-        SuggestedEmojis.chunked(8).forEach { rowEmojis ->
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                rowEmojis.forEach { e ->
-                    EmojiChip(
-                        emoji = e,
-                        selected = e == selectedEmoji,
-                        onClick = { onEmojiSelect(e) }
-                    )
-                }
-            }
-        }
-        Spacer(Modifier.height(4.dp))
-        SuggestedIconNames.chunked(8).forEach { rowNames ->
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                rowNames.forEach { name ->
-                    val vector = IconCatalog.byName(name)
-                    if (vector != null) {
-                        IconChip(
-                            vector = vector,
-                            description = name,
-                            selected = name == selectedIcon,
-                            onClick = { onIconSelect(name) }
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun IconPicker(
-    selected: String?,
-    onSelect: (String) -> Unit
-) {
-    Column(modifier = Modifier.fillMaxWidth()) {
-        IconCatalog.items.chunked(8).forEach { rowItems ->
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                rowItems.forEach { (name, vector) ->
-                    IconChip(
-                        vector = vector,
-                        description = name,
-                        selected = name == selected,
-                        onClick = { onSelect(name) }
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun SystemEmojiPicker(onSelect: (String) -> Unit) {
-    var query by rememberSaveable { mutableStateOf("") }
-    Column(modifier = Modifier.fillMaxWidth()) {
-        OutlinedTextField(
-            value = query,
-            onValueChange = { query = it },
-            label = { Text("Search emojis") },
-            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth()
-        )
-        Spacer(Modifier.height(8.dp))
-        if (query.isBlank()) {
-            AndroidView(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(280.dp),
-                factory = { context ->
-                    EmojiPickerView(context).apply {
-                        setOnEmojiPickedListener { picked ->
-                            onSelect(picked.emoji)
-                        }
-                    }
-                }
-            )
-        } else {
-            val results = remember(query) { EmojiSearchData.search(query) }
-            if (results.isEmpty()) {
-                Text(
-                    text = "No matches",
-                    modifier = Modifier.padding(16.dp),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            } else {
-                Column(modifier = Modifier.fillMaxWidth()) {
-                    results.take(48).chunked(8).forEach { row ->
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            row.forEach { e ->
-                                EmojiChip(
-                                    emoji = e,
-                                    selected = false,
-                                    onClick = { onSelect(e) }
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun EmojiChip(emoji: String, selected: Boolean, onClick: () -> Unit) {
-    val background = if (selected) {
-        MaterialTheme.colorScheme.primaryContainer
-    } else {
-        Color.Transparent
-    }
-    Surface(
-        color = background,
-        shape = CircleShape,
-        onClick = onClick
-    ) {
-        Text(
-            text = emoji,
-            fontSize = 22.sp,
-            modifier = Modifier.padding(8.dp)
-        )
-    }
-}
-
-@Composable
-private fun IconChip(
-    vector: androidx.compose.ui.graphics.vector.ImageVector,
-    description: String,
-    selected: Boolean,
-    onClick: () -> Unit
-) {
-    val background = if (selected) {
-        MaterialTheme.colorScheme.primaryContainer
-    } else {
-        Color.Transparent
-    }
-    Surface(
-        color = background,
-        shape = CircleShape,
-        onClick = onClick
-    ) {
-        Icon(
-            imageVector = vector,
-            contentDescription = description,
-            modifier = Modifier
-                .padding(8.dp)
-                .size(22.dp)
-        )
-    }
-}
