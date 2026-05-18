@@ -365,22 +365,22 @@ private fun StatTile(label: String, value: String, modifier: Modifier = Modifier
     }
 }
 
-private fun parseDate(date: String): Triple<Int, Int, Int> {
+internal fun parseDate(date: String): Triple<Int, Int, Int> {
     val parts = date.split("-")
     return Triple(parts[0].toInt(), parts[1].toInt(), parts[2].toInt())
 }
 
-private fun formatDate(year: Int, month: Int, day: Int): String =
+internal fun formatDate(year: Int, month: Int, day: Int): String =
     "%04d-%02d-%02d".format(year, month, day)
 
-private fun daysInMonth(year: Int, month: Int): Int {
+internal fun daysInMonth(year: Int, month: Int): Int {
     val cal = Calendar.getInstance()
     cal.clear()
     cal.set(year, month - 1, 1)
     return cal.getActualMaximum(Calendar.DAY_OF_MONTH)
 }
 
-private fun firstWeekdayMondayBased(year: Int, month: Int): Int {
+internal fun firstWeekdayMondayBased(year: Int, month: Int): Int {
     val cal = Calendar.getInstance()
     cal.clear()
     cal.set(year, month - 1, 1)
@@ -388,7 +388,7 @@ private fun firstWeekdayMondayBased(year: Int, month: Int): Int {
     return ((sundayBased + 5) % 7)
 }
 
-private fun monthLabel(year: Int, month: Int): String {
+internal fun monthLabel(year: Int, month: Int): String {
     val names = listOf(
         "January", "February", "March", "April", "May", "June",
         "July", "August", "September", "October", "November", "December"
