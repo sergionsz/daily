@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.CircleShape
@@ -20,6 +21,7 @@ import androidx.compose.material.icons.filled.AddPhotoAlternate
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
@@ -64,44 +66,46 @@ fun TaskDetailScreen(
     var name by rememberSaveable(key) { mutableStateOf(initial?.name ?: "") }
     var emoji by rememberSaveable(key) { mutableStateOf(initial?.emoji ?: "") }
     var iconName by rememberSaveable(key) { mutableStateOf(initial?.iconName) }
-    var isOneTime by rememberSaveable(key) { mutableStateOf(initial?.isOneTime ?: false) }
+    var isOneTime by rememberSaveable(key) { mutableStateOf(initial?.isOneTime ?: true) }
     var scheduledDate by rememberSaveable(key) {
-        mutableStateOf(initial?.scheduledDate ?: if (initial?.isOneTime == true) today else null)
+        val defaultScheduled = if (initial?.isOneTime ?: true) today else null
+        mutableStateOf(initial?.scheduledDate ?: defaultScheduled)
     }
     var pickerOpen by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
     var datePickerOpen by remember { mutableStateOf(false) }
 
-    fun commitAndClose() {
+    val canSave = name.trim().isNotEmpty()
+
+    fun commit() {
         val trimmed = name.trim()
-        if (trimmed.isNotEmpty()) {
-            val cleanedEmoji = emoji.trim().ifEmpty { null }
-            val effectiveScheduled = if (isOneTime) (scheduledDate ?: today) else null
-            val task = if (initial == null) {
-                Task(
-                    id = System.currentTimeMillis(),
-                    name = trimmed,
-                    emoji = cleanedEmoji,
-                    iconName = iconName,
-                    completionDates = emptySet(),
-                    isOneTime = isOneTime,
-                    scheduledDate = effectiveScheduled
-                )
-            } else {
-                initial.copy(
-                    name = trimmed,
-                    emoji = cleanedEmoji,
-                    iconName = iconName,
-                    isOneTime = isOneTime,
-                    scheduledDate = effectiveScheduled
-                )
-            }
-            onSave(task)
+        if (trimmed.isEmpty()) return
+        val cleanedEmoji = emoji.trim().ifEmpty { null }
+        val effectiveScheduled = if (isOneTime) (scheduledDate ?: today) else null
+        val task = if (initial == null) {
+            Task(
+                id = System.currentTimeMillis(),
+                name = trimmed,
+                emoji = cleanedEmoji,
+                iconName = iconName,
+                completionDates = emptySet(),
+                isOneTime = isOneTime,
+                scheduledDate = effectiveScheduled
+            )
+        } else {
+            initial.copy(
+                name = trimmed,
+                emoji = cleanedEmoji,
+                iconName = iconName,
+                isOneTime = isOneTime,
+                scheduledDate = effectiveScheduled
+            )
         }
+        onSave(task)
         onClose()
     }
 
-    BackHandler { commitAndClose() }
+    BackHandler { onClose() }
 
     Scaffold(
         topBar = {
@@ -109,11 +113,23 @@ fun TaskDetailScreen(
                 modifier = Modifier.statusBarsPadding(),
                 title = { Text(if (initial == null) "New task" else "Task") },
                 navigationIcon = {
-                    IconButton(onClick = { commitAndClose() }) {
+                    IconButton(onClick = onClose) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 }
             )
+        },
+        bottomBar = {
+            Button(
+                onClick = { commit() },
+                enabled = canSave,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .padding(horizontal = 16.dp, vertical = 12.dp)
+            ) {
+                Text(if (initial == null) "Create task" else "Save changes")
+            }
         }
     ) { padding ->
         Column(

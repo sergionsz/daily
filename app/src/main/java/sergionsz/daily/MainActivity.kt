@@ -2,6 +2,7 @@ package sergionsz.daily
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
@@ -21,16 +22,17 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.pager.HorizontalPager
-import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.BarChart
+import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
+import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
@@ -38,17 +40,16 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.PrimaryTabRow
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -60,7 +61,6 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import sergionsz.daily.ui.theme.DailyTheme
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
@@ -146,32 +146,37 @@ fun DailyApp(repo: TaskRepository) {
             }
         )
     } else {
-        val pagerState = rememberPagerState(pageCount = { 2 })
-        val scope = rememberCoroutineScope()
+        var selectedDestination by remember { mutableStateOf(0) }
+        BackHandler(enabled = selectedDestination != 0) {
+            selectedDestination = 0
+        }
         Scaffold(
-            topBar = {
-                PrimaryTabRow(
-                    selectedTabIndex = pagerState.currentPage,
-                    modifier = Modifier.statusBarsPadding()
-                ) {
-                    Tab(
-                        selected = pagerState.currentPage == 0,
-                        onClick = { scope.launch { pagerState.animateScrollToPage(0) } },
-                        text = { Text("Daily") }
+            modifier = Modifier.statusBarsPadding(),
+            bottomBar = {
+                NavigationBar {
+                    NavigationBarItem(
+                        selected = selectedDestination == 0,
+                        onClick = { selectedDestination = 0 },
+                        icon = { Icon(Icons.Default.CheckCircle, contentDescription = null) },
+                        label = { Text("Today") }
                     )
-                    Tab(
-                        selected = pagerState.currentPage == 1,
-                        onClick = { scope.launch { pagerState.animateScrollToPage(1) } },
-                        text = { Text("Stats") }
+                    NavigationBarItem(
+                        selected = selectedDestination == 1,
+                        onClick = { selectedDestination = 1 },
+                        icon = { Icon(Icons.Default.CalendarMonth, contentDescription = null) },
+                        label = { Text("Calendar") }
+                    )
+                    NavigationBarItem(
+                        selected = selectedDestination == 2,
+                        onClick = { selectedDestination = 2 },
+                        icon = { Icon(Icons.Default.BarChart, contentDescription = null) },
+                        label = { Text("Stats") }
                     )
                 }
             }
         ) { padding ->
-            HorizontalPager(
-                state = pagerState,
-                modifier = Modifier.fillMaxSize().padding(padding)
-            ) { page ->
-                when (page) {
+            Box(modifier = Modifier.fillMaxSize().padding(padding)) {
+                when (selectedDestination) {
                     0 -> DailyTab(
                         tasks = tasks,
                         today = today,
@@ -186,7 +191,8 @@ fun DailyApp(repo: TaskRepository) {
                         onTaskClick = { task -> detailTarget = DetailTarget.Existing(task.id) },
                         onNewTask = { detailTarget = DetailTarget.New }
                     )
-                    1 -> StatsScreen(tasks = tasks, today = today)
+                    1 -> CalendarScreen(tasks = tasks, today = today)
+                    2 -> StatsScreen(tasks = tasks, today = today)
                 }
             }
         }
@@ -340,6 +346,15 @@ fun TaskRow(
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = alpha),
                 textDecoration = if (isCompleted) TextDecoration.LineThrough else null
             )
+            if (!task.isOneTime) {
+                Spacer(Modifier.width(6.dp))
+                Icon(
+                    imageVector = Icons.Default.Repeat,
+                    contentDescription = "Repeats daily",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha * 0.7f),
+                    modifier = Modifier.size(14.dp)
+                )
+            }
         }
         Spacer(Modifier.width(8.dp))
         if (reorderMode) {
@@ -430,7 +445,7 @@ private fun HeroHeader(completed: Int, total: Int) {
         )
         Spacer(Modifier.height(4.dp))
         Text(
-            text = "Daily",
+            text = "Today",
             style = MaterialTheme.typography.headlineLarge,
             fontWeight = FontWeight.SemiBold,
             color = MaterialTheme.colorScheme.onPrimaryContainer
