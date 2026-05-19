@@ -34,12 +34,18 @@ android {
     }
 
     buildTypes {
+        debug {
+            applicationIdSuffix = ".debug"
+            versionNameSuffix = "-debug"
+            resValue("string", "app_name", "Daily (Debug)")
+        }
         release {
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            resValue("string", "app_name", "Daily")
             signingConfig = if (System.getenv("KEYSTORE_PATH") != null) {
                 signingConfigs.getByName("release")
             } else {
@@ -53,6 +59,7 @@ android {
     }
     buildFeatures {
         compose = true
+        resValues = true
     }
 }
 
