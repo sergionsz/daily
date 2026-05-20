@@ -1,5 +1,6 @@
 package sergionsz.daily
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -69,15 +70,32 @@ import java.util.Date
 import java.util.Locale
 
 class MainActivity : ComponentActivity() {
+    private var quickAddRequest by mutableStateOf(false)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         val repo = TaskRepository(applicationContext)
+        if (intent?.action == ACTION_QUICK_ADD) quickAddRequest = true
         setContent {
             DailyTheme {
-                DailyApp(repo)
+                DailyApp(
+                    repo = repo,
+                    quickAddRequest = quickAddRequest,
+                    onQuickAddConsumed = { quickAddRequest = false }
+                )
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (intent.action == ACTION_QUICK_ADD) quickAddRequest = true
+    }
+
+    companion object {
+        const val ACTION_QUICK_ADD = "sergionsz.daily.action.QUICK_ADD"
     }
 }
 
@@ -88,11 +106,28 @@ private sealed class DetailTarget {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun DailyApp(repo: TaskRepository) {
+fun DailyApp(
+    repo: TaskRepository,
+    quickAddRequest: Boolean = false,
+    onQuickAddConsumed: () -> Unit = {}
+) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     var tasks by remember { mutableStateOf(repo.load()) }
     var detailTarget by remember { mutableStateOf<DetailTarget?>(null) }
     var reorderMode by remember { mutableStateOf(false) }
     var today by remember { mutableStateOf(TaskRepository.todayKey()) }
+
+    fun persist(newTasks: List<Task>) {
+        repo.save(newTasks)
+        sergionsz.daily.widget.notifyTodayWidget(context)
+    }
+
+    LaunchedEffect(quickAddRequest) {
+        if (quickAddRequest) {
+            detailTarget = DetailTarget.New
+            onQuickAddConsumed()
+        }
+    }
 
     LaunchedEffect(Unit) {
         val startupToday = TaskRepository.todayKey()
@@ -100,7 +135,7 @@ fun DailyApp(repo: TaskRepository) {
         val pruned = tasks.filter { it.shouldBePersisted(startupToday) }
         if (pruned.size != tasks.size) {
             tasks = pruned
-            repo.save(pruned)
+            persist(pruned)
         }
         while (true) {
             delay(60_000L)
@@ -110,7 +145,7 @@ fun DailyApp(repo: TaskRepository) {
                 val rolled = tasks.filter { it.shouldBePersisted(current) }
                 if (rolled.size != tasks.size) {
                     tasks = rolled
-                    repo.save(rolled)
+                    persist(rolled)
                 }
             }
         }
@@ -133,14 +168,14 @@ fun DailyApp(repo: TaskRepository) {
                     tasks.map { if (it.id == existingId) saved else it }
                 }
                 tasks = updated
-                repo.save(updated)
+                persist(updated)
             },
             onDelete = {
                 val existingId = (target as? DetailTarget.Existing)?.id
                 if (existingId != null) {
                     val updated = tasks.filter { it.id != existingId }
                     tasks = updated
-                    repo.save(updated)
+                    persist(updated)
                 }
                 detailTarget = null
             }
@@ -183,10 +218,10 @@ fun DailyApp(repo: TaskRepository) {
                         reorderMode = reorderMode,
                         onTasksChange = { newTasks ->
                             tasks = newTasks
-                            repo.save(newTasks)
+                            persist(newTasks)
                         },
                         onTasksReorder = { newTasks -> tasks = newTasks },
-                        onTasksReorderEnd = { repo.save(tasks) },
+                        onTasksReorderEnd = { persist(tasks) },
                         onToggleReorderMode = { reorderMode = !reorderMode },
                         onTaskClick = { task -> detailTarget = DetailTarget.Existing(task.id) },
                         onNewTask = { detailTarget = DetailTarget.New }
